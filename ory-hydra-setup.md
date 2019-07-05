@@ -221,6 +221,139 @@ $ docker run -d \
   -e HYDRA_ADMIN_URL=https://ory-hydra-poc--hydra:4445 \
   -e NODE_TLS_REJECT_UNAUTHORIZED=0 \
   rdclda/hydra-login-consent-node:latest
+
+# Let's check if it's running ok:
+$ docker logs ory-hydra-poc--consent
+
+> hydra-login-consent-logout@0.0.0 start /usr/src/app
+> node ./bin/www
 ~~~
 
+Let's take a look at the arguments:
 
+* `-p 9020:3000` exposes this service at `port 9020`. If you remember, that's the port of the `URLS_CONSENT` and `URLS_LOGIN` value from the ORY Hydra docker container (`URLS_CONSENT=http://localhost:9020/consent`, `URLS_LOGIN=http://localhost:9020/login`).
+* `HYDRA_ADMIN_URL=https://ory-hydra-poc--hydra:4445` point to the ORY Hydra Administrative API.
+* `NODE_TLS_REJECT_UNAUTHORIZED=0` disables TLS verification, because we are using self-signed certificates.
+
+## Define OAuth 2.0 Client
+
+Great! Our infrastructure is all set up!
+
+Next it's time to perform the OAuth 2.0 Authorize Code flow.
+
+For that purpose, the ORY Hydra CLI has a feature that sets up an OAuth 2.0 Consumer and an OAuth 2.0 callback URL. Typically, this would be a third-party application that requests access to a user's resources on your servers - for example a FinTech App you wrote that analyses a  user's loan accounts and thus requires read access to the user's loan accounts.
+
+Before we go ahead, the OAuth 2.0 Client that performs the request has to be set up. Let's call the client `loansharks-r-us`. We have to specify which OAuth 2.0 Grant Types, OAuth 2.0 Scope, OAuth 2.0 Response Types, and Callback URLs the client may request:
+
+~~~bash
+# Define the oAuth2.0 client 
+#  -- make sure HYDRA_ADMIN_URL is set!
+$ hydra clients create --skip-tls-verify \
+    --id loansharks-r-us \
+    --secret 'W3(L)urM0n3y!' \
+    --grant-types authorization_code,refresh_token,client_credentials,implicit \
+    --response-types token,code,id_token \
+    --scope openid,offline,ReadAccountsDetail,ReadBalances,ReadTransactionsDetail \
+    --callbacks http://127.0.0.1:9010/callback
+
+OAuth 2.0 Client ID: loansharks-r-us
+~~~
+
+**Note** _You should not provide secrets using command line flags, the secret might leak to bash history and similar systems_
+
+Let's dive into some of the arguments:
+
+* `--skip-tls-verify` is supported by all management commands (create/delete/update/... OAuth 2.0 Client, JSON Web Key, ...) and tells the CLI to trust any certificate authority - even self-signed ones. We need this flag because the server uses a self-signed certificate. In production deployments, you would use a certificate signed by a trusted CA.
+* `--grant-types authorize_code,refresh_token,client_credentials,implicit` we want to be able to perform all of these OAuth 2.0 flows.
+* `--response-types` token,code,id_token allows us to receive authorize codes, access and refresh tokens, and OpenID Connect ID Tokens.
+* `--scope openid,offline,ReadAccountsDetail,ReadBalances,ReadTransactionsDetail` allows the client to request various permissions:
+  * `openid` allows the client to perform the OpenID Connect flow and request an OpenID Connect ID Token.
+  * `offline` allows the client to request a refresh token. Because we want to continuously update the analysis, the app must be able to refresh expired access tokens. This scope allows that.
+  * `ReadAccountsDetail` this is an imaginary scope that is not handled by ORY Hydra but serves the purpose of making it clear that we could request read access to account details.
+  * `ReadBalances` - same as above
+  * `ReadTransactionsDetail` - same as above
+  * `--callbacks http://localhost:9010/callback` allows the client to request this redirect uri.
+
+## Perform an example oAuth2 flow
+
+Perfect, let's perform an exemplary OAuth 2.0 Authorize Code Flow! To make this easy, the ORY Hydra CLI provides a helper command called `hydra token user`. Just imagine this being, for example, `passport.js` that is generating an auth code url, redirecting the browser to it, and then exchanging the authorize code for an access token.
+
+![OAuth 2.0 Authorize Code flow](./imgs/auth_code.png)
+
+The same thing happens with this command:
+
+~~~bash
+# Start flow
+$ hydra token user --skip-tls-verify \
+    --port 9010 \
+    --auth-url https://localhost:9000/oauth2/auth \
+    --token-url https://localhost:9000/oauth2/token \
+    --client-id loansharks-r-us \
+    --client-secret 'W3(L)urM0n3y!' \
+    --scope openid,offline,ReadAccountsDetail
+
+Setting up home route on http://127.0.0.1:9010/
+Setting up callback listener on http://127.0.0.1:9010/callback
+Press ctrl + c on Linux / Windows or cmd + c on OSX to end the process.
+If your browser does not open automatically, navigate to:
+
+        http://127.0.0.1:9010/
+~~~
+
+Your browser opens, the welcome text is displayed and you can click on the login link -- provide credentials and the consent, then the token user app will return the tokens below:
+
+~~~text
+Access Token:
+        Q5CSsn_BKknjGoga9Hi0sV88_znqeZ5ABk84jZE7o5I.Yr9dzhaFf4HjQ2YpTqMXg23aB7en_C75vYeMg4DyI2s
+Refresh Token:
+        BkBhdKs9LzyZKVpkFb7P1VeQUH0THgZCjHwYfmuVZ28.Z1ZugUrQjzFyHt-UiLatoWHc5avywizQhkuHZBY81oU
+
+Expires in:
+        2019-07-05 17:17:06.166635 +0100 WEST m=+3628.954574766
+
+ID Token:
+        eyJhbGciOiJSUzI1NiIsImtpZCI6InB1YmxpYzplMzJiN2ZlYi05NDM4LTQ4OGEtODkwNy0wYzRhNzRmNWI3MjkiLCJ0eXAiOiJKV1QifQ.eyJhdF9oYXNoIjoiRTIwcjVsQzRHTDZsMmhwQnU2NzFpQSIsImF1ZCI6WyJsb2Fuc2hhcmtzLXItdXMiXSwiYXV0aF90aW1lIjoxNTYyMzM5ODE1LCJleHAiOjE1NjIzNDM0MjcsImlhdCI6MTU2MjMzOTgyNywiaXNzIjoiaHR0cHM6Ly9sb2NhbGhvc3Q6OTAwMC8iLCJqdGkiOiI3MThmMmE1YS01MTI3LTQ1YjMtYjMwMS1kZDM4Y2RmZmIwYWIiLCJub25jZSI6InlnZ3Rxc3hqaWxmZGFiaW96Y3poamVyeCIsInJhdCI6MTU2MjMzOTgwNiwic2lkIjoiOTY0MDI0NDMtOTYzYS00MTk2LWEyNDQtYjk1YmNkNGRjNWJhIiwic3ViIjoiZm9vQGJhci5jb20ifQ.p2VOguZep8Dp3lvSZ3a_AL3uGo_NA5zvbx5GFXCKGwWlE1kxo4Wl5dS4Ds-2YIlFoqma42_00jg2Q87UrY8Z8hME1nZ1lPtkL8jqH8CrFSfF-n0xHw7BWTQ5qFiZvIY-4nYm_RIwvVKDzc1CO_uwwz2f2pi21FzKwUWF4S2LOyUEhQ_p0AmBDXgBfV-Mrp8Ut4G_fG17fZAEBFP1We8SdokBirXWggN1IpTptKqJKeu6PfeBgvdKhDQhA40CJFkC539dsNbj3LuAn5p0QuUngV3O9-fDSo_A3Kr-G-lexl09A6iLkB2iErCaw8wtUCTBqFZ7aZQmSRKSKxZTVrGAkgE_QJjrH2SX3O5TyXCeuxpqjpPt38EgSzGgUMxm838UrjerLdtC1Uch5tbj-K6TvdjqWzPaGY9MTcvV6WRrqk-tfpUDjju5SJVL_DjuSB9xswZXO1UN6RoqG-WKJ9Uhu1mjpSgnYjMc_wS_Fv_o9RdgM7zUJjAIOq5ex4YfGqvXKC6X8Jd81en3FgHZcJEmPneGmkyMssMC6nVJteCgnvJsqyrdhFjNuqNfYheVjWMQfv8o0DeaPVXYmPddZkubSkbHzBmKIrqvYaTfVrl2ZcXeZDQVpqXKOK6AzdbOJzHDvP756hTBakEUHLXNOcIpDdMnKr9MC38ODW6EC3BGfzM
+~~~
+
+## Validating OAuth 2.0 Access Tokens
+
+When an OAuth 2.0 client makes a request to the resource server, the resource server needs some way to verify the access token. The OAuth 2.0 core spec doesn’t define a specific method of how the resource server should verify access tokens, just mentions that it requires coordination between the resource and authorization servers. In some cases, especially with small services, both endpoints are part of the same system, and can share token information internally such as in a database. In larger systems where the two endpoints are on different servers, this has led to proprietary and non-standard protocols for communicating between the two servers.
+
+The OAuth 2.0 Token Introspection extension defines a protocol that returns information about an access token, intended to be used by resource servers or other internal servers.
+
+![OAuth 2.0 flow](./imgs/basic-oauth2-system.png)
+
+The best and easiest way to validate OAuth 2.0 Access Tokens is by performing OAuth 2.0 Token Introspection. You can do this with the CLI `hydra token introspect <token>`.
+
+~~~bash
+# Introspect the token via Hydra
+$ hydra token introspect \
+   --skip-tls-verify \
+   'Q5CSsn_BKknjGoga9Hi0sV88_znqeZ5ABk84jZE7o5I.Yr9dzhaFf4HjQ2YpTqMXg23aB7en_C75vYeMg4DyI2s'
+~~~
+
+...and as a result...
+
+~~~json
+{
+        "active": true,
+        "aud": null,
+        "client_id": "loansharks-r-us",
+        "exp": 1562343427,
+        "iat": 1562339827,
+        "iss": "https://localhost:9000/",
+        "scope": "openid offline ReadAccountsDetail",
+        "sub": "foo@bar.com",
+        "token_type": "access_token"
+}
+~~~
+
+What happens under water... (showcase CURL) is:
+
+~~~bash
+$ curl -X POST --insecure \
+    -d 'token=Q5CSsn_BKknjGoga9Hi0sV88_znqeZ5ABk84jZE7o5I.Yr9dzhaFf4HjQ2YpTqMXg23aB7en_C75vYeMg4DyI2s' \
+    https://localhost:9001/oauth2/introspect
+
+{"active":true,"scope":"openid offline ReadAccountsDetail","client_id":"loansharks-r-us","sub":"foo@bar.com","exp":1562343427,"iat":1562339827,"iss":"https://localhost:9000/","token_type":"access_token"}
+~~~
