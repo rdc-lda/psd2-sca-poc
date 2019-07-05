@@ -11,7 +11,7 @@ This guide will:
 
 Before starting with this guide, please install the most recent version of Docker Desktop for Mac. It is advised to start with a "fresh" configuration -- hence apply the factory defaults is a good idea.
 
-## Install Hydra utilities for OSX
+## Install Hydra CLI for OSX
 
 In order to use the native hydra CLI on your workstation, install via brew:
 
@@ -147,4 +147,80 @@ Let's dive into the various settings:
 **Note**: _In this example we did not define a value for the optional setting `OAUTH2_ERROR_URL`. This URL can be used to provide an endpoint which will receive error messages from ORY Hydra that should be displayed to the end user. The URL receives `error` and `error_description` parameters. If this value is not set, Hydra uses the fallback endpoint `/oauth2/fallbacks/error` and displays a default error message. In order to obtain a uniform UI, you might want to include such an endpoint in your login or consent provider._
 
 To confirm that the instance is running properly, [open the health check](https://localhost:9001/health/ready). If asked, accept the self signed certificate in your browser. You should see `{"status":"ok"}`.
+
+### Management of Hydra server
+
+Here we discuss basic access to logfiles and management APIs.
+
+On start up, ORY Hydra is initializing some values. Let's take a look at the logs:
+
+~~~bash
+# Get the logs...
+$ docker logs ory-hydra-poc--hydra
+
+[...]
+Config file not found because "Config File ".hydra" Not Found in "[/]""
+time="2019-07-05T13:03:30Z" level=info msg="No tracer configured - skipping tracing setup"
+time="2019-07-05T13:03:30Z" level=info msg="Connecting with postgres://*:*@ory-hydra-poc--postgres:5432/hydra-poc?sslmode=disable"
+time="2019-07-05T13:03:30Z" level=info msg="Connected to SQL!"
+
+time="2019-07-05T13:03:30Z" level=warning msg="JSON Web Key Set \"hydra.openid.id-token\" does not exist yet, generating new key pair..."
+time="2019-07-05T13:03:33Z" level=warning msg="JSON Web Key Set \"hydra.jwt.access-token\" does not exist yet, generating new key pair..."
+time="2019-07-05T13:03:34Z" level=info msg="Software quality assurance features are enabled. Learn more at: https://www.ory.sh/docs/ecosystem/sqa"
+time="2019-07-05T13:03:34Z" level=warning msg="JSON Web Key Set \"hydra.https-tls\" does not exist yet, generating new key pair..."
+
+time="2019-07-05T13:03:38Z" level=info msg="Setting up http server on :4444"
+time="2019-07-05T13:03:38Z" level=info msg="Setting up http server on :4445"
+~~~
+
+As you can see, the following steps are performed when running ORY Hydra against a fresh database:
+
+1. If no system secret was given (in our case we provided one), a random one is generated and emitted to the logs. Note this down, otherwise you won't be able to restart Hydra.
+1. Cryptographic keys are generated for the:
+    1. OpenID Connect ID Token, 
+    1. the consent challenge and response, 
+    1. TLS encryption using a self-signed certificate,
+
+...which is why we need to run all commands using `--skip-tls-verify`
+
+ORY Hydra can be managed using the Hydra Command Line Interface (CLI), which is using ORY Hydra's REST APIs.
+
+~~~bash
+# Run via Docker
+$ docker run --rm -it \
+  -e HYDRA_ADMIN_URL=https://ory-hydra-poc--hydra:4445 \
+  --network hydrapoc \
+  oryd/hydra:v1.0.0 \
+  [command] --skip-tls-verify [options]
+
+Hydra is a cloud native high throughput OAuth2 and OpenID Connect provider
+
+# Run from your MacBook
+$ export HYDRA_ADMIN_URL=https://localhost:9001
+$ hydra [command] \
+   --skip-tls-verify \
+   [options]
+
+# ... for example:
+$ hydra clients list --skip-tls-verify
+
+| CLIENT ID | NAME | RESPONSE TYPES | SCOPE | REDIRECT URIS | GRANT TYPES | TOKEN ENDPOINT AUTH METHOD |
+|-----------|------|----------------|-------|---------------|-------------|----------------------------|
+~~~
+
+## Deploy Login & Consent App
+
+The Login Provider and Consent Provider can be two separate web services. We provide a [reference implementation](https://github.com/rdc-lda/hydra-login-consent-node) which combines both features in one app. Here, we will use deploy that app using Docker.
+
+~~~bash
+# Start the Login and Consent module
+$ docker run -d \
+  --name ory-hydra-poc--consent \
+  -p 9020:3000 \
+  --network hydrapoc \
+  -e HYDRA_ADMIN_URL=https://ory-hydra-poc--hydra:4445 \
+  -e NODE_TLS_REJECT_UNAUTHORIZED=0 \
+  rdclda/hydra-login-consent-node:latest
+~~~
+
 
