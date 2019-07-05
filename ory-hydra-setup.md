@@ -357,3 +357,6 @@ $ curl -X POST --insecure \
 
 {"active":true,"scope":"openid offline ReadAccountsDetail","client_id":"loansharks-r-us","sub":"foo@bar.com","exp":1562343427,"iat":1562339827,"iss":"https://localhost:9000/","token_type":"access_token"}
 ~~~
+
+## Query active consents for a user
+
