@@ -358,5 +358,33 @@ $ curl -X POST --insecure \
 {"active":true,"scope":"openid offline ReadAccountsDetail","client_id":"loansharks-r-us","sub":"foo@bar.com","exp":1562343427,"iat":1562339827,"iss":"https://localhost:9000/","token_type":"access_token"}
 ~~~
 
-## Query active consents for a user
+## Next steps
 
+### Product
+
+* Overview of AIS and PISP
+* User stories, user journeys, UX
+* PSD/2 is retail based...
+  * consent management is unclear for corporate
+  * approval workflows are unclear
+
+### Architecture / designs
+
+* Based upon product direction, we can start designing the integration with entitlements
+* Open-banking API endpoints will have their own unique path in the system (add-on)
+* Product choice (for an oAuth2 provider - incl, login / consent management)
+  * Assume customer has oAuth2 / OpenId Connect + consent management in place
+  * Deliver broker (Hydra) which enables SDU to wire into existing ecosystem
+
+### Technology / PoC
+
+* Summarize what we accomplished so far (time based consent)
+* Query / revoke active consents for a user (PoC)
+* Add CBX claims to login module (PoC)
+* Add LDAP backend as login module (PoC)
+* Deploy Hydra as OpenShift container
+* Rewrite login / consent module (harden for production)
+* Implement one-time-consent support (PISP) (show the flow)
+* Look closer to Token Introspection (performance wise)
+
+Result: presentation for product management group.
